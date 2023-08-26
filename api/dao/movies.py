@@ -19,11 +19,33 @@ class MovieDAO:
      If a user_id value is suppled, a `favorite` boolean property should be returned to
      signify whether the user has added the movie to their "My Favorites" list.
     """
+       
     # tag::all[]
     def all(self, sort, order, limit=6, skip=0, user_id=None):
-        # TODO: Get list from movies from Neo4j
-        return popular
+        def get_movies(tx, sort, order, limit=6, skip=0, user_id=None):
+
+            favorites = self.get_user_favorites(tx, user_id)
+            # Define the cypher statement
+            cypher = """
+            MATCH (m:Movie)
+            WHERE exists(m.`{0}`)
+            RETURN m {{ .*, favorite:m.tmdbId in $favorites }} AS movie
+            ORDER BY m.`{0}` {1}
+            SKIP $skip
+            LIMIT $limit
+            """.format(sort, order)
+
+            # Run the statement within the transaction passed as the first argument
+            result = tx.run(cypher, limit=limit, skip=skip, user_id=user_id,favorites=favorites)
+
+            return [row.value("movie") for row in result]
+            
+        with self.driver.session() as session:
+            return session.execute_read(get_movies, sort, order, limit, skip, user_id)
+
     # end::all[]
+
+ 
 
     """
     This method should return a paginated list of movies that have a relationship to the
@@ -132,5 +154,13 @@ class MovieDAO:
     """
     # tag::getUserFavorites[]
     def get_user_favorites(self, tx, user_id):
-        return []
+        if not user_id:
+            return []
+
+        result = tx.run('''
+            MATCH (u:User {userId: $userId})-[:HAS_FAVORITE]->(m)
+            RETURN m.tmdbId AS id
+            ''', userId = user_id)
+        
+        return [record.get("id") for record in result]
     # end::getUserFavorites[]
